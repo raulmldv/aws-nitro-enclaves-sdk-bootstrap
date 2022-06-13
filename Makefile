@@ -12,6 +12,8 @@ CONFIG_TEMPLATE                = configs/microvm-kernel-config-
 DEFAULT_AARCH64_CROSS_COMPILER = /usr/bin/aarch64-linux-gnu-
 HOST_MACHINE                   = $(shell uname -m)
 BUILD_ARCH                    ?= $(HOST_MACHINE)
+IMAGE_NAME_TAG				   = build_env:latest
+CONTAINER_NAME				   = build_env
 
 CONFIG=$(CONFIG_TEMPLATE)$(BUILD_ARCH)
 
@@ -30,7 +32,7 @@ endif
 
 .PHONY: all blobs
 all: blobs
-blobs: $(OUTDIR)/nsm.ko $(OUTDIR)/$(KERN_IMAGE) $(OUTDIR)/init
+blobs: $(OUTDIR)/nsm.ko $(OUTDIR)/socket_imp.ko $(OUTDIR)/$(KERN_IMAGE) $(OUTDIR)/init
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -41,12 +43,12 @@ $(OUTDIR):
 $(BUILDDIR)/linux.tar: linux-url $(BUILDDIR)
 	curl -L $$(head -n1 linux-url) | unxz > $@
 
-$(BUILDDIR)/linux.sign: linux-url $(BUILDDIR)
-	curl -L $$(tail -n1 linux-url) > $@
+# $(BUILDDIR)/linux.sign: linux-url $(BUILDDIR)
+#	curl -L $$(tail -n1 linux-url) > $@
 
-$(BUILDDIR)/linux: $(BUILDDIR)/linux.tar $(BUILDDIR)/linux.sign
+$(BUILDDIR)/linux: $(BUILDDIR)/linux.tar # $(BUILDDIR)/linux.sign
 	mkdir -p $(BUILDDIR)/linux
-	gpg2 --verify  $(BUILDDIR)/linux.sign $(BUILDDIR)/linux.tar
+#	gpg2 --verify  $(BUILDDIR)/linux.sign $(BUILDDIR)/linux.tar
 	tar -xf $(BUILDDIR)/linux.tar --strip-components 1 -C $(BUILDDIR)/linux
 
 $(BUILDDIR)/linux/.config: $(BUILDDIR)/linux $(CONFIG)
@@ -65,11 +67,27 @@ $(OUTDIR)/nsm.ko: $(BUILDDIR)/$(KERN_IMAGE) $(OUTDIR)
 	make ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(BUILDDIR)/linux M=$(PWD)/nsm-driver
 	cp $(PWD)/nsm-driver/nsm.ko $(OUTDIR)/nsm.ko
 
+$(OUTDIR)/socket_imp.ko: $(BUILDDIR)/$(KERN_IMAGE) $(OUTDIR)
+	make ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(BUILDDIR)/linux M=$(PWD)/socket-impersonation
+	cp $(PWD)/socket-impersonation/socket_imp.ko $(OUTDIR)/socket_imp.ko
+
 $(OUTDIR)/init:  $(OUTDIR)
 	make  BUILD_ARCH=$(BUILD_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(PWD)/init
 	cp $(PWD)/init/init $(OUTDIR)
 
 clean:
 	make -C $(BUILDDIR)/linux M=$(PWD)/nsm-driver clean
+	make -C $(BUILDDIR)/linux M=$(PWD)/socket-impersonation clean
 	make -C $(PWD)/init clean
 	rm -rf $(BUILDDIR)/*
+
+build-sock:
+	docker image rm ${IMAGE_NAME_TAG} --force
+	docker build -t ${IMAGE_NAME_TAG} --build-arg BUILD_ARCH=x86_64 .
+
+run-sock-env: build-sock
+	docker run --name ${CONTAINER_NAME} ${IMAGE_NAME_TAG}
+	docker cp ${CONTAINER_NAME}:/build/blobs .
+
+clean-sock:
+	docker container stop ${CONTAINER_NAME} && docker container rm ${CONTAINER_NAME}

@@ -14,6 +14,6 @@ ADD ./ /build/
 
 WORKDIR /build
 
-RUN gpg2 --locate-keys torvalds@kernel.org gregkh@kernel.org -vv
+# RUN gpg2 --locate-keys torvalds@kernel.org gregkh@kernel.org -vv
 RUN make BUILD_ARCH=${BUILD_ARCH}
 
